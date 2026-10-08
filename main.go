@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 )
 
 type WeatherResponse struct {
@@ -23,25 +24,40 @@ func handlerWeather(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "",
+		DB:       0,
+	})
+	defer rdb.Close()
+
+	cached, err := rdb.Get(r.Context(), city).Result()
+	if err == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(cached))
+		return
+	}
+
 	customHttpClient := &http.Client{
 		Timeout: 10 * time.Second,
 	}
 
-	apiKey := os.Getenv("API_KEY")
-
 	requestBody := WeatherClient{
-		apiKey:     apiKey,
+		apiKey:     os.Getenv("API_KEY"),
 		httpClient: customHttpClient,
 	}
-	response, err := requestBody.GetWeather(city)
+
+	weather, err := requestBody.GetWeather(city)
 	if err != nil {
-		log.Printf("Ошибка вызова Weather API для города %s: %v", city, err)
-		http.Error(w, "Не удалось получить данные о погоде", http.StatusBadGateway)
+		http.Error(w, "Failed to fetch weather", http.StatusInternalServerError)
 		return
 	}
 
+	jsonData, _ := json.Marshal(weather)
+	rdb.Set(r.Context(), city, jsonData, 12*time.Hour)
+
 	w.Header().Set("Content-Type", "Application/json")
-	json.NewEncoder(w).Encode(response)
+	w.Write(jsonData)
 }
 
 type WeatherClient struct {
@@ -84,6 +100,7 @@ func main() {
 	if err := godotenv.Load(); err != nil {
 		log.Println("Предупреждение: .env файл не найден, проверяем системное окружение")
 	}
+
 	http.HandleFunc("/weather", handlerWeather)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
