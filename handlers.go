@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -46,45 +45,34 @@ func (c *WeatherClient) GetWeather(city string) (*WeatherData, error) {
 	return &data, nil
 }
 
-func handlerWeather(w http.ResponseWriter, r *http.Request) {
+type Server struct {
+	Rdb    *redis.Client
+	Client *WeatherClient
+}
+
+func (s Server) handlerWeather(w http.ResponseWriter, r *http.Request) {
 	city := r.URL.Query().Get("city")
 	if city == "" {
 		http.Error(w, "city parameter is required", http.StatusBadRequest)
 		return
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     "localhost:6379",
-		Password: "",
-		DB:       0,
-	})
-	defer rdb.Close()
-
-	cached, err := rdb.Get(r.Context(), city).Result()
+	cached, err := s.Rdb.Get(r.Context(), city).Result()
 	if err == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(cached))
 		return
 	}
 
-	customHttpClient := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-
-	requestBody := WeatherClient{
-		apiKey:     os.Getenv("API_KEY"),
-		httpClient: customHttpClient,
-	}
-
-	weather, err := requestBody.GetWeather(city)
+	weather, err := s.Client.GetWeather(city)
 	if err != nil {
 		http.Error(w, "Failed to fetch weather", http.StatusInternalServerError)
 		return
 	}
 
 	jsonData, _ := json.Marshal(weather)
-	rdb.Set(r.Context(), city, jsonData, 12*time.Hour)
+	s.Rdb.Set(r.Context(), city, jsonData, 12*time.Hour)
 
-	w.Header().Set("Content-Type", "Application/json")
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(jsonData)
 }
