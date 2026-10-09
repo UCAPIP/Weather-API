@@ -12,7 +12,7 @@ import (
 
 func main() {
 	if err := godotenv.Load(); err != nil {
-		log.Println("Предупреждение: .env файл не найден, проверяем системное окружение")
+		log.Println("Warning: .env file not found; checking system environment")
 	}
 
 	rdb := redis.NewClient(&redis.Options{
